@@ -28,6 +28,57 @@ python <예제 경로>/01_launch_sim/01_launch_sim.py
 
 > **참고**: `--headless` 옵션을 추가하면 GUI 없이 실행할 수 있습니다.
 
+## Jupyter 실행 (`jupyter/` 폴더)
+
+`jupyter/` 폴더의 `.ipynb` 튜토리얼은 별도 사전 준비가 필요합니다.
+
+### ⚠️ ipykernel 6.x 필수
+
+Isaac Sim의 `omni.kit.async_engine`은 자체 asyncio 이벤트 루프를 패치해서 사용합니다.
+하지만 **ipykernel 7+** 는 셀을 async 컨텍스트에서 실행하기 때문에, `AppLauncher(...)` 호출
+시점에 이미 이벤트 루프가 돌고 있어 다음 에러가 발생합니다.
+
+```
+RuntimeError: This event loop is already running
+AttributeError: '_UnixSelectorEventLoop' object has no attribute '_old_agen_hooks'
+```
+
+따라서 ipykernel은 반드시 **6.x** 를 사용해야 합니다.
+
+### 설치 절차 (한 번만)
+
+**1) Isaac Lab venv에 ipykernel 6.x 설치**
+
+```bash
+~/isaac/env_isaaclab/bin/python -m pip install "ipykernel<7" "jupyter_client<8.7"
+```
+
+**2) Jupyter 커널 등록**
+
+```bash
+~/isaac/env_isaaclab/bin/python -m ipykernel install --user \
+    --name isaaclab --display-name "Python (isaaclab)"
+```
+
+**3) Jupyter Lab 실행**
+
+```bash
+cd ~/isaac/isaacsim_tutorials/jupyter
+~/isaac/env_isaaclab/bin/jupyter lab
+```
+
+노트북을 열고 우상단 커널 선택에서 **Python (isaaclab)** 을 고르세요.
+
+### 사용 규칙
+
+- 셀은 **위에서 아래로 한 번씩 순서대로** 실행하세요.
+- 한 노트북당 Isaac Sim 앱은 **한 번만** 띄울 수 있습니다. 다시 처음부터 하려면 커널 재시작 후 진행하세요.
+- `AppLauncher` 셀 직후의 **GUI 펌프 셀** (Tornado `PeriodicCallback`) 을 반드시 실행해야 뷰포트 휠 줌/카메라 조작이 멈추지 않습니다.
+  asyncio task 방식(`asyncio.ensure_future`)은 ipykernel의 dispatch task와 충돌해서 `Cannot enter into task` 에러를 일으키므로 사용 금지입니다.
+- 시뮬레이션 리셋은 반드시 **`await sim.reset_async()`** 를 사용하세요.
+  동기 버전 `sim.reset()` 은 Kit 이벤트 루프와 충돌해 셀이 무한 대기 상태로 멈춥니다
+  (Isaac Sim 공식 문서: "Extensions/Jupyter 워크플로우에서는 async 버전 사용").
+
 ## 강의 목차
 
 ### Part 1. 시뮬레이션 기초 (01~04)
@@ -36,7 +87,7 @@ python <예제 경로>/01_launch_sim/01_launch_sim.py
 |---|------|------|
 | 01 | `01_launch_sim` | 시뮬레이터 실행 - SimulationApp 초기화, 지면/조명 설정, 기본 시뮬레이션 루프 |
 | 02 | `02_spawn_primitives` | 기본 도형 생성 - Cube, Sphere, Cone, Cylinder 등 USD 프리미티브 스폰 |
-| 03 | `03_rigid_body` | 강체 물리 - Visual 전용 vs Physics 적용 오브젝트 비교, 중력 시뮬레이션 |
+| 03 | `03_galileo_experiment` | 갈릴레오 자유낙하 실험 — 피사의 사탑에서 무게가 다른 두 공을 동시에 떨어뜨려 질량과 낙하 시간의 무관성 확인 |
 | 04 | `04_simulation_loop` | 시뮬레이션 루프 - step(), reset(), physics dt, 에피소드 관리 |
 
 ### Part 2. 로봇 제어 및 센서 (05~14)

@@ -4,7 +4,7 @@
 06강의 위치 제어에서 Joint 3(Elbow)에 중력에 의한 오프셋이 발생하는 문제를
 중력 보상(Gravity Compensation)으로 해결합니다.
 
-PhysX의 get_generalized_gravity_forces()로 각 관절에 작용하는 중력 토크를 계산하고,
+PhysX의 get_gravity_compensation_forces()로 각 관절에 작용하는 중력 토크를 계산하고,
 이를 effort_target에 더해 중력을 상쇄합니다.
 
 비교 실험:
@@ -112,12 +112,14 @@ def main() -> None:
     TOTAL_STEPS = int(TOTAL_TIME / sim_dt)
 
     # ── 중력 보상 API 확인 ───────────────────────────────────────────────
-    has_gravity_api = hasattr(robot_b.root_physx_view, "get_generalized_gravity_forces")
+    # Isaac Sim 5.x: get_gravity_compensation_forces (신, 권장)
+    # Isaac Sim 4.x 이하: get_generalized_gravity_forces (구, deprecated)
+    has_gravity_api = hasattr(robot_b.root_physx_view, "get_gravity_compensation_forces") or \
+                      hasattr(robot_b.root_physx_view, "get_generalized_gravity_forces")
     if has_gravity_api:
         print("[INFO] PhysX gravity compensation API available")
     else:
-        print("[WARNING] get_generalized_gravity_forces() not found, trying alternative...")
-        # 사용 가능한 메서드 출력
+        print("[WARNING] gravity compensation API not found, trying alternative...")
         methods = [m for m in dir(robot_b.root_physx_view) if "grav" in m.lower() or "force" in m.lower()]
         print(f"  Available methods: {methods}")
 
@@ -126,12 +128,14 @@ def main() -> None:
     WINDOW_N = int(WINDOW_SEC / sim_dt)
     PLOT_INTERVAL = 3
 
-    t_buf = deque(maxlen=WINDOW_N)
+    # 버퍼는 전체 시간을 보존 (라이브 스크롤은 ax.set_xlim 으로 처리).
+    # maxlen 으로 자르면 저장된 PNG 에서 마지막 WINDOW_SEC 구간만 보이게 됩니다.
+    t_buf = deque()
     # Robot A (no compensation)
-    tgt_j3 = deque(maxlen=WINDOW_N)
-    act_a_j3 = deque(maxlen=WINDOW_N)
+    tgt_j3 = deque()
+    act_a_j3 = deque()
     # Robot B (with compensation)
-    act_b_j3 = deque(maxlen=WINDOW_N)
+    act_b_j3 = deque()
 
     # ── matplotlib 설정 ──────────────────────────────────────────────────
     if INTERACTIVE:
@@ -201,7 +205,11 @@ def main() -> None:
 
         if has_gravity_api:
             # PhysX에서 각 관절의 중력 토크를 계산
-            gravity_torques = robot_b.root_physx_view.get_generalized_gravity_forces()
+            # 신 API (get_gravity_compensation_forces) 우선, 구버전이면 fallback
+            if hasattr(robot_b.root_physx_view, "get_gravity_compensation_forces"):
+                gravity_torques = robot_b.root_physx_view.get_gravity_compensation_forces()
+            else:
+                gravity_torques = robot_b.root_physx_view.get_generalized_gravity_forces()
             # 중력 토크를 effort에 더해 상쇄
             robot_b.set_joint_effort_target(gravity_torques)
 

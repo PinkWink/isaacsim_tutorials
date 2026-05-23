@@ -118,12 +118,13 @@ def main() -> None:
     WINDOW_N = int(WINDOW_SEC / sim_dt)
     PLOT_INTERVAL = 3    # N step마다 그래프 갱신
 
-    # 데이터 버퍼 (deque: 윈도우 크기만큼만 유지)
-    t_buf = deque(maxlen=WINDOW_N)
-    tgt_j0 = deque(maxlen=WINDOW_N)
-    act_j0 = deque(maxlen=WINDOW_N)
-    tgt_j3 = deque(maxlen=WINDOW_N)
-    act_j3 = deque(maxlen=WINDOW_N)
+    # 데이터 버퍼 — 전체 시간을 보존 (라이브 스크롤은 아래 set_xlim 으로 처리).
+    # maxlen 으로 자르면 저장된 PNG 에서 마지막 WINDOW_SEC 구간만 보이게 됩니다.
+    t_buf = deque()
+    tgt_j0 = deque()
+    act_j0 = deque()
+    tgt_j3 = deque()
+    act_j3 = deque()
 
     # ── matplotlib 실시간 그래프 초기화 ──────────────────────────────────
     if INTERACTIVE:
