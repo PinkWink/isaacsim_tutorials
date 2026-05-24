@@ -4,6 +4,10 @@
 IsaacLab의 Camera 센서로 RGB와 Depth 이미지를 획득하고,
 matplotlib 창에서 실시간으로 표시합니다.
 
+씬 구성: 동일한 파란 원기둥 4개를 카메라에서 거리가 점점 멀어지도록
+(약 1.6m → 4.2m) 배치하여, RGB(크기 변화)와 Depth(색 변화)에서
+거리감이 어떻게 표현되는지 비교할 수 있게 했다.
+
 필수 플래그: --enable_cameras (카메라 렌더링 활성화)
 필수 패키지: python3-tk (또는 python3.11-tk)
 
@@ -65,46 +69,28 @@ def design_scene() -> Camera:
     cfg = sim_utils.DistantLightCfg(intensity=3000.0, color=(1.0, 1.0, 1.0))
     cfg.func("/World/DistantLight", cfg, translation=(1.0, 1.0, 10.0))
 
-    # ── 색상별 오브젝트 ──────────────────────────────────────────────────
-    # 빨간 큐브
-    cfg = sim_utils.CuboidCfg(
-        size=(0.3, 0.3, 0.3),
+    # ── 동일 원기둥 4개를 거리별로 배치 ──────────────────────────────────
+    # 모두 같은 크기/질량의 파란 원기둥. 카메라(3.0, 0.0, 1.5)에서
+    # 멀어지는 방향(-x)으로 약 1m 간격, 좌우(y) 살짝 어긋나게 두어
+    # 서로 가리지 않으면서 거리만 달라지도록 배치한다.
+    # → RGB에서는 동일 형상이 크기만 작아 보이고,
+    #   Depth에서는 거리 차이가 색으로 명확히 드러난다.
+    cylinder_cfg = sim_utils.CylinderCfg(
+        radius=0.15, height=0.6,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
         mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
         collision_props=sim_utils.CollisionPropertiesCfg(),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.1, 0.1)),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.3, 0.9)),
     )
-    cfg.func("/World/Objects/RedCube", cfg, translation=(1.0, 0.0, 0.15))
 
-    # 초록 원뿔
-    cfg = sim_utils.ConeCfg(
-        radius=0.15, height=0.5,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-        mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.9, 0.1)),
-    )
-    cfg.func("/World/Objects/GreenCone", cfg, translation=(1.0, -0.6, 0.25))
-
-    # 파란 원기둥
-    cfg = sim_utils.CylinderCfg(
-        radius=0.12, height=0.4,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-        mass_props=sim_utils.MassPropertiesCfg(mass=0.8),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.2, 0.9)),
-    )
-    cfg.func("/World/Objects/BlueCylinder", cfg, translation=(1.2, 0.5, 0.2))
-
-    # 노란 구
-    cfg = sim_utils.SphereCfg(
-        radius=0.2,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-        mass_props=sim_utils.MassPropertiesCfg(mass=0.6),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.9, 0.1)),
-    )
-    cfg.func("/World/Objects/YellowSphere", cfg, translation=(1.5, 0.0, 0.2))
+    cylinder_positions = [
+        ("Near",   ( 2.0, -0.5, 0.3)),   # 카메라로부터 약 1.6m
+        ("Mid1",   ( 1.0, -0.15, 0.3)),  # 약 2.3m
+        ("Mid2",   ( 0.0,  0.2, 0.3)),   # 약 3.2m
+        ("Far",    (-1.0,  0.55, 0.3)),  # 약 4.2m
+    ]
+    for name, pos in cylinder_positions:
+        cylinder_cfg.func(f"/World/Objects/Cylinder_{name}", cylinder_cfg, translation=pos)
 
     # ── 카메라 센서 ──────────────────────────────────────────────────────
     camera_cfg = CameraCfg(
@@ -168,7 +154,7 @@ def main() -> None:
         plt.ion()
 
     fig, (ax_rgb, ax_depth) = plt.subplots(1, 2, figsize=(10, 4))
-    fig.suptitle("Camera Sensor — RGB & Depth (real-time)", fontsize=13)
+    fig.suptitle("Camera Sensor — Identical Cylinders at Different Distances", fontsize=13)
 
     # 초기 이미지로 imshow 생성
     rgb_data = camera.data.output["rgb"][0, :, :, :3].cpu().numpy()  # (H, W, 3)

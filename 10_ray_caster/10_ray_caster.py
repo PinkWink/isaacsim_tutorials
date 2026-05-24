@@ -1,293 +1,336 @@
 """
-10_ray_caster.py - RayCaster 센서로 거리 측정 (LiDAR 유사)
+10_ray_caster.py - 공중 레일 스캐너로 계단 단면 스캔
 
-RayCaster는 지정된 패턴으로 광선(ray)을 쏘아 메시와의 교차점을 계산하는 센서입니다.
-실제 로봇의 LiDAR, 높이 맵(height map) 측정 등에 사용됩니다:
-  - RayCasterCfg로 센서 설정 (패턴, 대상 메시, 시각화)
-  - GridPatternCfg로 격자 형태의 광선 패턴 정의
-  - ray_hits_w 데이터로 광선이 맞은 월드 좌표 획득
-  - 여러 환경에서 동시에 동작하는 병렬 ray casting
+공중에 떠 있는 레일 위 스캐너가 좌우로 왕복하며 아래쪽 계단을 향해
+ray를 발사합니다. 측정한 바닥 높이를 스캐너 x 위치별로 누적하면
+계단 단면이 그래프 위에 점점 드러납니다.
+
+요점:
+  - RayCasterCfg / GridPatternCfg 로 5×5 격자 광선 패턴 생성
+  - 계단을 하나의 UsdGeom.Mesh 로 만들어 mesh_prim_paths 단일-메시 제약을 만족
+  - 스캐너는 kinematic rigid body 로 만들어 매 스텝 write_root_pose_to_sim 으로 이동
+  - ray_hits_w 의 z 평균을 모아 실시간 그래프에 누적
 
 실행:
     source env_isaaclab/bin/activate
     cd lectures/10_ray_caster
-    python 10_ray_caster.py --num_envs 2
 
-    # GUI 없이 실행
-    python 10_ray_caster.py --headless --num_envs 2
+    # 권장: headless + matplotlib
+    python 10_ray_caster.py --headless
+
+    # IsaacSim GUI 도 함께 보기
+    python 10_ray_caster.py
 """
 
-# ── 1. AppLauncher 패턴 (import 전에 Omniverse 앱을 먼저 실행) ────────────
+# ── 1. AppLauncher ────────────────────────────────────────────────────────
 import argparse
 
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="10 - RayCaster 센서 튜토리얼")
-parser.add_argument("--num_envs", type=int, default=2, help="생성할 환경(env) 개수")
+parser = argparse.ArgumentParser(description="10 - RayCaster 로 계단 스캔")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
-# ── 2. Omniverse / IsaacLab import (AppLauncher 이후에만 가능) ─────────────
-"""AppLauncher 초기화 이후에 나머지 모듈을 import 합니다."""
-
+# ── 2. Import ────────────────────────────────────────────────────────────
+import os
+import math
 import torch
 
 import isaaclab.sim as sim_utils
 from isaaclab.sim import SimulationCfg, SimulationContext
+from isaaclab.assets import RigidObject, RigidObjectCfg
 from isaaclab.sensors.ray_caster import RayCaster, RayCasterCfg, patterns
-from isaaclab.utils.math import random_orientation
+
+from pxr import UsdGeom, Sdf, Gf
+import omni.usd
+
+# ── 3. Matplotlib ────────────────────────────────────────────────────────
+import matplotlib
+try:
+    matplotlib.use("TkAgg")
+    INTERACTIVE = True
+except Exception:
+    matplotlib.use("Agg")
+    INTERACTIVE = False
+import matplotlib.pyplot as plt
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 씬 설계
+# 계단/스캔 사양
 # ══════════════════════════════════════════════════════════════════════════
+NUM_STEPS    = 6
+STEP_DEPTH   = 0.4    # x 방향 한 단 깊이
+STEP_RISE    = 0.15   # 한 단 높이
+STEP_WIDTH_Y = 2.0    # y 방향 폭 (가로)
+PRE_FLAT     = 1.0    # 계단 시작 전 평지 길이 (x<0 쪽)
+POST_FLAT    = 1.0    # 계단 끝 후 평지 길이
+
+RAIL_Z       = 2.5    # 스캐너가 매달린 레일 높이
+SWEEP_CENTER = (NUM_STEPS * STEP_DEPTH) / 2.0          # 1.2
+SWEEP_AMPL   = 2.0                                      # ±2 m 왕복
+SWEEP_PERIOD = 20.0                                     # 주기 (sec) — 천천히 한 바퀴
+
+STAIRS_MESH_PATH = "/World/Stairs/StairsMesh"
+STAIRS_PARENT    = "/World/Stairs"
 
 
-def design_scene(num_envs: int) -> dict:
-    """씬을 구성합니다.
+# ══════════════════════════════════════════════════════════════════════════
+# 계단 단면(profile) → 하나의 USD Mesh
+# ══════════════════════════════════════════════════════════════════════════
+def _build_profile() -> list[tuple[float, float]]:
+    """xz 평면에서 계단의 옆모습 윤곽 점들을 순서대로 반환.
 
-    GroundPlane, 조명, 그리고 여러 환경에 강체 공(ball)을 배치합니다.
-    RayCaster는 각 공에 부착되어, 공 위치에서 아래 방향으로 광선을 쏩니다.
-
-    Args:
-        num_envs: 생성할 환경 개수.
-
-    Returns:
-        origins: 각 환경의 원점 좌표 텐서.
+    구성: [PRE_FLAT 평지] → [6단 계단] → [POST_FLAT 평지]
+    각 단은 (수평 tread, 수직 riser) 한 쌍으로 표현된다.
     """
+    pts: list[tuple[float, float]] = []
+    pts.append((-PRE_FLAT, 0.0))   # 시작 평지 좌측 끝
+    pts.append((0.0, 0.0))         # 계단 시작점
+    for i in range(NUM_STEPS):
+        x_left  = i * STEP_DEPTH
+        x_right = (i + 1) * STEP_DEPTH
+        z_top   = (i + 1) * STEP_RISE
+        # riser: (x_left, prev_z) → (x_left, z_top)
+        pts.append((x_left, z_top))
+        # tread: (x_left, z_top) → (x_right, z_top)
+        pts.append((x_right, z_top))
+    # 끝 평지
+    pts.append((NUM_STEPS * STEP_DEPTH + POST_FLAT, NUM_STEPS * STEP_RISE))
+    return pts
 
-    # ── 2-1) Ground Plane (지면) ──────────────────────────────────────────
-    # RayCaster가 광선을 쏘아 교차점을 찾을 대상 메시입니다.
-    # mesh_prim_paths에서 이 경로를 지정합니다.
-    cfg_ground = sim_utils.GroundPlaneCfg()
-    cfg_ground.func("/World/defaultGroundPlane", cfg_ground)
 
-    # ── 2-2) Distant Light (원거리 조명) ──────────────────────────────────
-    cfg_light = sim_utils.DistantLightCfg(
-        intensity=3000.0,
-        color=(0.95, 0.95, 1.0),
+def spawn_stairs_mesh() -> None:
+    """단일 UsdGeom.Mesh 로 계단 형상을 생성한다.
+
+    각 profile 세그먼트를 y축으로 STEP_WIDTH_Y 만큼 압출해 quad 를 만들고,
+    그 quad 를 **삼각형 2개로 분할**해 fv_indices 에 넣는다.
+
+    IsaacLab RayCaster 는 USD 메시를 Warp 로 변환할 때 face_vertex_counts 는
+    무시하고 GetFaceVertexIndicesAttr 를 곧바로 3개씩 묶어 삼각형으로 해석한다
+    (ray_caster.py:196 참고). 따라서 메시는 **반드시 삼각형 분할**되어 있어야
+    하며, 그렇지 않으면 인덱스가 엉뚱하게 묶여 깨진 메시가 만들어진다.
+    """
+    stage = omni.usd.get_context().get_stage()
+
+    # 부모 Xform 생성 (RayCaster 가 자식에서 Mesh 를 찾아냄)
+    UsdGeom.Xform.Define(stage, Sdf.Path(STAIRS_PARENT))
+    mesh = UsdGeom.Mesh.Define(stage, Sdf.Path(STAIRS_MESH_PATH))
+
+    profile = _build_profile()
+    y0, y1 = -STEP_WIDTH_Y / 2.0, STEP_WIDTH_Y / 2.0
+
+    points: list[Gf.Vec3f] = []
+    fv_counts: list[int] = []
+    fv_indices: list[int] = []
+    idx = 0
+    for (x0, z0), (x1, z1) in zip(profile[:-1], profile[1:]):
+        if abs(z1 - z0) < 1e-6:
+            # 수평면 (tread / ground / top): 위에서 보이도록 normal = +z
+            p = [
+                Gf.Vec3f(x0, y0, z0),     # 0
+                Gf.Vec3f(x1, y0, z0),     # 1
+                Gf.Vec3f(x1, y1, z0),     # 2
+                Gf.Vec3f(x0, y1, z0),     # 3
+            ]
+            tri_order = [(0, 1, 2), (0, 2, 3)]   # CCW from +z
+        else:
+            # 수직 riser: 정면(-x) 에서 보이도록 normal = -x
+            z_lo, z_hi = min(z0, z1), max(z0, z1)
+            p = [
+                Gf.Vec3f(x0, y0, z_lo),   # 0
+                Gf.Vec3f(x0, y1, z_lo),   # 1
+                Gf.Vec3f(x0, y1, z_hi),   # 2
+                Gf.Vec3f(x0, y0, z_hi),   # 3
+            ]
+            tri_order = [(0, 3, 2), (0, 2, 1)]   # CCW from -x
+        points.extend(p)
+        for tri in tri_order:
+            fv_counts.append(3)
+            fv_indices.extend(idx + k for k in tri)
+        idx += 4
+
+    mesh.CreatePointsAttr(points)
+    mesh.CreateFaceVertexCountsAttr(fv_counts)
+    mesh.CreateFaceVertexIndicesAttr(fv_indices)
+    # 단순 회색 표면. PreviewSurface 없이도 RayCaster 동작에는 문제 없다.
+    mesh.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.58, 0.62)])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 씬: 바닥/조명/계단/레일/스캐너
+# ══════════════════════════════════════════════════════════════════════════
+def design_scene() -> RigidObject:
+    """씬을 구성하고 스캐너 RigidObject 를 반환한다."""
+
+    # 바닥 (시각용 — RayCaster 타겟은 계단 메시만)
+    cfg = sim_utils.GroundPlaneCfg()
+    cfg.func("/World/defaultGroundPlane", cfg)
+
+    # 조명
+    cfg = sim_utils.DistantLightCfg(intensity=3000.0, color=(0.95, 0.95, 1.0))
+    cfg.func("/World/DistantLight", cfg, translation=(2.0, 2.0, 10.0))
+
+    # 계단 (단일 Mesh)
+    spawn_stairs_mesh()
+
+    # 공중 레일 (시각용 얇은 막대 — 물리 없음)
+    rail_len = 2 * SWEEP_AMPL + 1.0
+    rail_cfg = sim_utils.CuboidCfg(
+        size=(rail_len, 0.04, 0.04),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.15, 0.15, 0.18)),
     )
-    cfg_light.func("/World/DistantLight", cfg_light, translation=(0.0, 0.0, 10.0))
+    rail_cfg.func(
+        "/World/Rail", rail_cfg,
+        translation=(SWEEP_CENTER, 0.0, RAIL_Z + 0.15),
+    )
 
-    # ── 2-3) 환경 원점(origin) 생성 ──────────────────────────────────────
-    # 각 환경을 일정 간격으로 배치합니다.
-    # 예: num_envs=2이면 (0,0,0), (3,0,0)
-    env_spacing = 3.0
-    origins = []
-    for i in range(num_envs):
-        origin = (i * env_spacing, 0.0, 0.0)
-        origins.append(origin)
-
-        # ── 2-4) 각 환경에 Origin Xform 생성 ─────────────────────────────
-        # RayCaster의 prim_path 와일드카드(/World/Origin.*/ball)가 매칭될 수 있도록
-        # /World/Origin0, /World/Origin1, ... 프림을 생성합니다.
-        prim_path = f"/World/Origin{i}"
-        prim_utils = sim_utils  # sim_utils에 spawn_xform 등 없으므로 USD 직접 사용
-        # Xform 프림 생성
-        import isaacsim.core.utils.prims as prim_utils_core
-
-        prim_utils_core.create_prim(prim_path, "Xform", translation=origin)
-
-        # ── 2-5) 강체 공(ball) 생성 ───────────────────────────────────────
-        # RayCaster가 부착될 강체입니다.
-        # RayCaster는 이 공의 위치를 추적하며 광선을 발사합니다.
-        cfg_ball = sim_utils.SphereCfg(
-            radius=0.15,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                disable_gravity=True,  # 중력 비활성화 (공중에 유지)
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
+    # 스캐너 — 중력만 끈 일반 dynamic rigid body. 매 스텝 pose+velocity 0 으로
+    # 덮어써서 "테레포트" 시킨다. (kinematic_enabled 는 GPU PhysX 백엔드에서
+    # 매 스텝 write 와 함께 쓰면 illegal-memory-access 가 발생하는 케이스가 있음)
+    scanner_cfg = RigidObjectCfg(
+        prim_path="/World/Scanner",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.2, 0.2, 0.2),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(disable_gravity=True),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.2, 0.6, 1.0),  # 파란색 공
-            ),
-        )
-        cfg_ball.func(
-            f"{prim_path}/ball",
-            cfg_ball,
-            translation=(0.0, 0.0, 2.0),  # origin 기준 상대 좌표 (높이 2m)
-        )
-
-    # origins를 텐서로 변환
-    origins_tensor = torch.tensor(origins, dtype=torch.float32)
-
-    return origins_tensor
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.45, 0.05)),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(SWEEP_CENTER, 0.0, RAIL_Z)),
+    )
+    return RigidObject(scanner_cfg)
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 시뮬레이션 실행 함수
+# 메인
 # ══════════════════════════════════════════════════════════════════════════
-
-
-def run_simulator(
-    sim: SimulationContext,
-    ray_caster: RayCaster,
-    num_envs: int,
-    origins: torch.Tensor,
-) -> None:
-    """RayCaster 센서를 사용한 시뮬레이션 루프를 실행합니다.
-
-    Args:
-        sim: SimulationContext 인스턴스.
-        ray_caster: RayCaster 센서 인스턴스.
-        num_envs: 환경 개수.
-        origins: 각 환경의 원점 좌표.
-    """
-    sim_dt = sim.get_physics_dt()
-    step_count = 0
-
-    # ── RayCaster 기본 정보 출력 ──────────────────────────────────────────
-    # RayCaster 센서가 생성한 광선(ray) 정보를 확인합니다.
-    print("=" * 70)
-    print("[RayCaster 센서 정보]")
-    print(f"  광선(ray) 개수: {ray_caster.num_rays}")
-    print(f"  센서 개수 (환경 개수): {num_envs}")
-    print(f"  ray_hits_w shape: ({num_envs}, {ray_caster.num_rays}, 3)")
-    print("=" * 70)
-
-    # ── 시뮬레이션 루프 ──────────────────────────────────────────────────
-    while simulation_app.is_running():
-        # 시뮬레이션이 정지되었으면 루프 종료
-        if sim.is_stopped():
-            break
-        # 일시정지 상태면 렌더링만 수행
-        if not sim.is_playing():
-            sim.step(render=True)
-            continue
-
-        # ── (1) 250 step마다 공 위치 랜덤 리셋 ───────────────────────────
-        # 공의 높이를 랜덤으로 변경하여 RayCaster의 거리 측정 변화를 관찰합니다.
-        if step_count % 250 == 0:
-            print(f"\n[INFO] 공 위치 랜덤 리셋 (step={step_count})")
-
-            # 각 환경의 공을 랜덤 높이(1.0 ~ 3.0m)에 배치
-            for i in range(num_envs):
-                prim_path = f"/World/Origin{i}/ball"
-                # 랜덤 높이 생성
-                random_height = 1.0 + torch.rand(1).item() * 2.0  # 1.0 ~ 3.0m
-                random_x_offset = (torch.rand(1).item() - 0.5) * 1.0  # -0.5 ~ 0.5m
-                random_y_offset = (torch.rand(1).item() - 0.5) * 1.0
-
-                new_pos = (
-                    origins[i, 0].item() + random_x_offset,
-                    origins[i, 1].item() + random_y_offset,
-                    random_height,
-                )
-
-                # USD를 통해 공 위치 업데이트
-                from pxr import UsdGeom
-
-                stage = sim_utils.get_current_stage()
-                prim = stage.GetPrimAtPath(prim_path)
-                if prim.IsValid():
-                    xform = UsdGeom.Xformable(prim)
-                    xform.ClearXformOpOrder()
-                    xform.AddTranslateOp().Set(new_pos)
-
-                print(f"  env {i}: ball 위치 = ({new_pos[0]:.2f}, {new_pos[1]:.2f}, {new_pos[2]:.2f})")
-
-        # ── (2) 물리 스텝 실행 ────────────────────────────────────────────
-        sim.step()
-        step_count += 1
-
-        # ── (3) RayCaster 업데이트 ────────────────────────────────────────
-        # RayCaster의 내부 버퍼를 최신 물리 상태로 갱신합니다.
-        # force_recompute=True로 매 스텝마다 광선을 다시 계산합니다.
-        ray_caster.update(dt=sim_dt, force_recompute=True)
-
-        # ── (4) 100 step마다 RayCaster 데이터 출력 ────────────────────────
-        if step_count % 100 == 0:
-            # ray_hits_w: 광선이 메시와 교차한 월드 좌표
-            # shape: (num_envs, num_rays, 3) - [x, y, z]
-            ray_hits = ray_caster.data.ray_hits_w
-
-            print(f"\n[Step {step_count}] RayCaster 데이터:")
-            print(f"  ray_hits_w shape: {ray_hits.shape}")
-
-            for env_idx in range(num_envs):
-                hits = ray_hits[env_idx]  # shape: (num_rays, 3)
-
-                # 유효한 히트만 필터링 (z > -1e5: 유효하지 않은 히트는 매우 큰 음수)
-                valid_mask = hits[:, 2] > -1e4
-                valid_hits = hits[valid_mask]
-
-                if valid_hits.numel() > 0:
-                    # 히트 포인트의 z 좌표 통계
-                    max_z = valid_hits[:, 2].max().item()
-                    min_z = valid_hits[:, 2].min().item()
-                    mean_z = valid_hits[:, 2].mean().item()
-
-                    print(f"  env {env_idx}: 유효 히트 {valid_hits.shape[0]}개, "
-                          f"z범위=[{min_z:.3f}, {max_z:.3f}], z평균={mean_z:.3f}")
-                else:
-                    print(f"  env {env_idx}: 유효 히트 없음 (광선이 메시에 도달하지 못함)")
-
-            # 센서 위치 출력
-            print(f"  센서 위치 (pos_w): {ray_caster.data.pos_w}")
-            print(f"  총 광선 수: {ray_caster.num_rays}")
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 메인 함수
-# ══════════════════════════════════════════════════════════════════════════
-
-
 def main() -> None:
-    """RayCaster 센서 시뮬레이션을 설정하고 실행합니다."""
-
-    # ── SimulationContext 생성 ────────────────────────────────────────────
+    # ── SimulationContext ────────────────────────────────────────────────
     sim_cfg = SimulationCfg(dt=1.0 / 60.0, device=args_cli.device)
     sim = SimulationContext(sim_cfg)
+    sim.set_camera_view(eye=[4.5, 5.5, 3.5], target=[1.2, 0.0, 0.5])
 
-    # 카메라 시점: 환경 전체가 보이도록 설정
-    sim.set_camera_view(eye=[5.0, 5.0, 5.0], target=[1.0, 0.0, 1.0])
+    scanner = design_scene()
 
-    # ── 씬 구성 ──────────────────────────────────────────────────────────
-    num_envs = args_cli.num_envs
-    origins = design_scene(num_envs)
-
-    # ── RayCaster 센서 생성 ──────────────────────────────────────────────
-    # RayCasterCfg: 광선 센서의 설정을 정의합니다.
-    #
-    # - prim_path: 센서가 부착될 프림 경로.
-    #   "/World/Origin.*/ball"은 모든 환경의 ball을 매칭합니다.
-    #   Origin0/ball, Origin1/ball, ... 에 각각 센서가 부착됩니다.
-    #
-    # - mesh_prim_paths: 광선이 교차할 대상 메시 목록.
-    #   GroundPlane 메시를 지정하여 바닥면과의 교차점을 계산합니다.
-    #
-    # - pattern_cfg: 광선 패턴 설정.
-    #   GridPatternCfg는 2D 격자 형태의 광선 패턴을 생성합니다.
-    #   resolution=0.1m 간격, size=(2.0, 2.0)m 범위의 격자.
-    #   각 격자 점에서 아래 방향(0,0,-1)으로 광선을 발사합니다.
-    #
-    # - debug_vis: True이면 광선 히트 포인트를 시각적으로 표시합니다.
+    # ── RayCaster ────────────────────────────────────────────────────────
     ray_caster_cfg = RayCasterCfg(
-        prim_path="/World/Origin.*/ball",
-        mesh_prim_paths=["/World/defaultGroundPlane"],
+        prim_path="/World/Scanner",
+        mesh_prim_paths=[STAIRS_PARENT],   # 계단 단일 메시
         pattern_cfg=patterns.GridPatternCfg(
-            resolution=0.1,
-            size=(2.0, 2.0),
+            resolution=0.05,
+            size=(0.2, 0.2),               # 20×20 cm 풋프린트 → 5×5 = 25 rays
         ),
         debug_vis=not args_cli.headless,
     )
     ray_caster = RayCaster(cfg=ray_caster_cfg)
 
-    # ── sim.reset() ───────────────────────────────────────────────────────
-    # 씬 생성 후 반드시 호출하여 물리 엔진을 초기화합니다.
     sim.reset()
-    print("[INFO] sim.reset() 완료 - 시뮬레이션 준비 완료")
-    print(f"[INFO] 환경 개수: {num_envs}")
-    print(f"[INFO] 환경 원점: {origins}")
+    print(f"[INFO] sim.reset() complete | num_rays = {ray_caster.num_rays}")
 
-    # ── 시뮬레이션 실행 ───────────────────────────────────────────────────
-    run_simulator(sim, ray_caster, num_envs, origins)
+    # ── matplotlib 실시간 창 ────────────────────────────────────────────
+    if INTERACTIVE:
+        plt.ion()
+    fig, ax = plt.subplots(1, 1, figsize=(9, 4.5))
+    fig.suptitle("RayCaster — Overhead Rail Scanner Reads the Staircase Profile",
+                 fontsize=13)
+
+    # Ground-truth staircase profile
+    truth = _build_profile()
+    ax.plot([p[0] for p in truth], [p[1] for p in truth],
+            "k--", lw=1.2, alpha=0.7, label="Ground truth (staircase)")
+    measured_dot, = ax.plot([], [], "o", color="tab:orange", ms=4, alpha=0.8,
+                            label="RayCaster measured z (mean of 25 rays)")
+    scanner_dot, = ax.plot([], [], "v", color="tab:red", ms=12,
+                           label="Scanner position")
+
+    ax.set_xlim(-PRE_FLAT - 0.3, NUM_STEPS * STEP_DEPTH + POST_FLAT + 0.3)
+    ax.set_ylim(-0.15, RAIL_Z + 0.2)
+    ax.axhline(RAIL_Z, color="gray", ls=":", lw=0.8, alpha=0.5)
+    ax.text(ax.get_xlim()[0] + 0.1, RAIL_Z + 0.05, "rail height", fontsize=8, color="gray")
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("z (m)")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="upper right")
+    plt.tight_layout()
+
+    sim_dt = sim.get_physics_dt()
+    TOTAL_STEPS = 1200          # 20초 = 정확히 한 사이클 (천천히 좌-우-좌 완주)
+    DISPLAY_INTERVAL = 6
+
+    measured_x: list[float] = []
+    measured_z: list[float] = []
+
+    # 첫 프레임 — pose + 0 속도 로 초기화한 뒤 한 번 step 해서 view 안정화
+    zero_vel = torch.zeros(1, 6, device=sim.device)
+    init_pose = torch.tensor([[SWEEP_CENTER, 0.0, RAIL_Z, 1.0, 0.0, 0.0, 0.0]],
+                             device=sim.device)
+    scanner.write_root_pose_to_sim(init_pose)
+    scanner.write_root_velocity_to_sim(zero_vel)
+    sim.step()
+    ray_caster.update(dt=sim_dt, force_recompute=True)
+
+    print(f"[INFO] running {TOTAL_STEPS} steps — scanner sweep ±{SWEEP_AMPL:.1f} m, "
+          f"period {SWEEP_PERIOD:.0f} s")
+    print("=" * 70)
+
+    for step in range(TOTAL_STEPS):
+        if not simulation_app.is_running():
+            break
+
+        # 스캐너 좌우 sin 왕복 — pose 와 함께 0 속도 도 매번 덮어쓴다
+        t = step * sim_dt
+        x = SWEEP_CENTER + SWEEP_AMPL * math.sin(2.0 * math.pi * t / SWEEP_PERIOD)
+        pose = torch.tensor([[x, 0.0, RAIL_Z, 1.0, 0.0, 0.0, 0.0]],
+                            device=sim.device)
+        scanner.write_root_pose_to_sim(pose)
+        scanner.write_root_velocity_to_sim(zero_vel)
+
+        sim.step()
+        ray_caster.update(dt=sim_dt, force_recompute=True)
+
+        # 25 ray 의 z 평균을 한 점으로 기록. miss 한 ray 는 +inf 로 표시되므로
+        # (raycast_mesh 기본값) finite 한 ray 만 골라 평균을 낸다.
+        hits = ray_caster.data.ray_hits_w[0]
+        z = hits[:, 2]
+        valid = z[torch.isfinite(z)]
+        if valid.numel() > 0:
+            z_mean = valid.mean().item()
+            measured_x.append(x)
+            measured_z.append(z_mean)
+
+        # 실시간 업데이트
+        if INTERACTIVE and step % DISPLAY_INTERVAL == 0:
+            measured_dot.set_data(measured_x, measured_z)
+            scanner_dot.set_data([x], [RAIL_Z])
+            fig.canvas.draw_idle()
+            fig.canvas.flush_events()
+
+        if (step + 1) % 200 == 0:
+            print(f"  [Step {step + 1:4d}]  scanner x = {x:+.2f} m   "
+                  f"측정 z = {z_mean:.3f} m")
+
+    print(f"\n[INFO] complete — {TOTAL_STEPS} steps, {len(measured_x)} 측정점")
+
+    # ── 결과 저장 후 자동 종료 ───────────────────────────────────────────
+    # plt.show() 는 호출하지 않는다 — 블로킹 호출이라 IsaacSim Kit 과
+    # GUI 리소스가 충돌해 창을 닫지 못하는 경우가 있다. PNG 로 저장하고
+    # 곧바로 창을 닫는다. 결과는 저장된 PNG 로 확인할 것.
+    measured_dot.set_data(measured_x, measured_z)
+    save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "10_ray_caster_result.png")
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"[INFO] result saved: {save_path}")
+
+    if INTERACTIVE:
+        plt.ioff()
+    plt.close(fig)
+
+    simulation_app.close()
+    print("[DONE] simulation ended")
 
 
 if __name__ == "__main__":
     main()
-    simulation_app.close()
-    print("\n[DONE] 시뮬레이션 종료")
