@@ -114,7 +114,7 @@ cd ~/isaac/isaacsim_tutorials/jupyter
 | 17 | `17_mobile_navigation` | 목표점 내비게이션 - P 제어 기반 헤딩/거리 제어, 웨이포인트 추종 |
 | 19 | `19_obstacle_avoidance` | 장애물 회피 - 거리 기반 충돌 감지, 반응형 조향 |
 
-### Part 4. 강화학습 환경 (20~28)
+### Part 4. 강화학습 환경 (20~29)
 
 | # | 폴더 | 내용 |
 |---|------|------|
@@ -125,10 +125,11 @@ cd ~/isaac/isaacsim_tutorials/jupyter
 | 24 | `24_train_cartpole` | PPO 학습 - RSL-RL 통합, OnPolicyRunner, TensorBoard 로깅 |
 | 25 | `25_evaluate_policy` | 정책 평가 - 학습된 모델 로드, 에피소드 실행, 성능 평가 |
 | 26 | `26_train_locomotion` | 보행 학습 - 다리 로봇 보행 정책 학습 |
-| 27 | `27_terrain_generation` | 지형 생성 - 절차적 랜덤 지형 생성 |
-| 28 | `28_domain_randomization` | 도메인 랜덤화 - 로봇/환경 파라미터 랜덤화를 통한 Sim-to-Real 전이 |
+| 27 | `27_evaluate_locomotion` | 보행 정책 추론 - 26강 체크포인트 로드, ANYmal 보행 시각화 |
+| 28 | `28_terrain_generation` | 지형 생성 + 도메인 시프트 - 절차적 거친 지형에 26강 정책을 그대로 적용해 일반화 한계 관찰 |
+| 29 | `29_domain_randomization` | 도메인 랜덤화 - 로봇/환경 파라미터 랜덤화를 통한 Sim-to-Real 전이 |
 
-### Part 5. 커스텀 로봇 통합 - Pinky Pro (29~33)
+### Part 5. 커스텀 로봇 통합 - Pinky Pro (30~34)
 
 > **사전 준비**: Part 5 예제를 실행하려면 Pinky Pro 에셋이 필요합니다. 아래 안내를 참고하세요.
 
@@ -138,10 +139,11 @@ cd ~/isaac/isaacsim_tutorials/jupyter
 | 31 | `31_urdf_to_usd` | URDF->USD 변환 - UrdfConverter를 사용한 에셋 변환 파이프라인 |
 | 32 | `32_pinky_control` | Pinky 제어 - 차동 구동 제어, 웨이포인트 내비게이션 |
 | 33 | `33_pinky_sensors` | Pinky 센서 - 커스텀 로봇 센서 통합 (IMU, 인코더 등) |
+| 34 | `34_ros2_bridge` | ROS2 Jazzy 브릿지 - Gazebo 대체. /clock /tf /odom /joint_states /scan 게시 + /cmd_vel 구독 |
 
 #### Pinky Pro 에셋 준비
 
-Part 5 (29~33번) 예제에서 사용하는 Pinky Pro 로봇 에셋은 별도 저장소에서 클론해야 합니다.
+Part 5 (30~34번) 예제에서 사용하는 Pinky Pro 로봇 에셋은 별도 저장소에서 클론해야 합니다.
 
 ```bash
 # 30_urdf_preparation 폴더에 Pinky Pro ROS 2 패키지 클론

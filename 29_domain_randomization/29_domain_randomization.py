@@ -1,5 +1,5 @@
 """
-28_domain_randomization.py - 도메인 랜덤화 (Domain Randomization)
+29_domain_randomization.py - 도메인 랜덤화 (Domain Randomization)
 
 IsaacLab의 EventTermCfg를 사용하여 도메인 랜덤화(Domain Randomization)를 구현합니다.
 시뮬레이션과 실제 환경의 차이(sim-to-real gap)를 줄이기 위한 핵심 기술입니다:
@@ -7,19 +7,19 @@ IsaacLab의 EventTermCfg를 사용하여 도메인 랜덤화(Domain Randomizatio
   - "reset" 모드: 매 에피소드 리셋 시 실행 (예: 초기 상태 랜덤화)
   - "interval" 모드: 에피소드 진행 중 일정 간격으로 실행 (예: 외력, 속도 교란)
 
-이것은 시리즈의 마지막 강의(28강)입니다.
+이것은 시리즈의 마지막 강의(29강)입니다.
 20~25강에서 구축한 Cartpole 환경에 다양한 도메인 랜덤화를 적용합니다.
 
 실행:
     source env_isaaclab/bin/activate
-    cd lectures/28_domain_randomization
-    python 28_domain_randomization.py
+    cd lectures/29_domain_randomization
+    python 29_domain_randomization.py
 
     # GUI 없이 실행
-    python 28_domain_randomization.py --headless
+    python 29_domain_randomization.py --headless
 
     # 환경 수 변경
-    python 28_domain_randomization.py --num_envs 16
+    python 29_domain_randomization.py --num_envs 16
 """
 
 # ── 1. AppLauncher 패턴 ──────────────────────────────────────────────────

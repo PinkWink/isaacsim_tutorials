@@ -1,0 +1,24 @@
+# IDE
+.vscode/
+
+# 개인 작업 공간
+jupyter/
+
+# 학습/시뮬레이션 산출물 (학습 다시 돌리면 재생성됨)
+logs/
+
+# 31강이 URDF→USD 변환으로 생성하는 출력 (실행하면 재생성됨)
+31_urdf_to_usd/usd_output/
+
+# 30강에서 git clone으로 받는 외부 ROS 패키지 (README의 안내대로 사용자가 별도 클론)
+30_urdf_preparation/pinky_pro/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db

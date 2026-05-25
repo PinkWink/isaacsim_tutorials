@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<robot name="lever_long">
+
+  <!-- ===== 모터 하우징 (root) ===== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry><cylinder radius="0.05" length="0.12"/></geometry>
+      <material name="motor_gray"><color rgba="0.25 0.25 0.28 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry><cylinder radius="0.05" length="0.12"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0"/>
+      <mass value="5.0"/>
+      <inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ===== 빔 (length = 0.6 m) ===== -->
+  <link name="beam_link">
+    <visual>
+      <origin xyz="0.3 0 0"/>
+      <geometry><box size="0.6 0.04 0.04"/></geometry>
+      <material name="beam_orange"><color rgba="1.0 0.55 0.1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0.3 0 0"/>
+      <geometry><box size="0.6 0.04 0.04"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0.3 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.00013333333333333334" iyy="0.015066666666666666" izz="0.015066666666666666" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ===== 모터 관절 (revolute, axis = y) ===== -->
+  <joint name="motor_joint" type="revolute">
+    <parent link="base_link"/>
+    <child  link="beam_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <!-- 빔이 위/아래로 ±90° 정도만 움직이게 제한 -->
+    <limit lower="-1.5708" upper="1.5708" effort="50.0" velocity="20.0"/>
+    <dynamics damping="0.01" friction="0.0"/>
+  </joint>
+
+</robot>
