@@ -13,6 +13,9 @@ logs/
 # 30강에서 git clone으로 받는 외부 ROS 패키지 (README의 안내대로 사용자가 별도 클론)
 30_urdf_preparation/pinky_pro/
 
+# g1이 git clone으로 받는 외부 보행 모션 데이터 (g1.py 주석의 안내대로 사용자가 별도 클론)
+g1/g1_retargeted_motions/
+
 # Python
 __pycache__/
 *.pyc
