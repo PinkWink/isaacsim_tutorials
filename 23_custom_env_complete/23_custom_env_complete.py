@@ -8,8 +8,8 @@
   - 이 환경은 24강에서 실제 RL 학습에 사용됩니다
 
 실행:
-    source env_isaaclab/bin/activate
-    cd lectures/23_custom_env_complete
+    source ~/isaac/env_isaaclab/bin/activate
+    cd ~/isaac/isaacsim_tutorials/23_custom_env_complete
     python 23_custom_env_complete.py
 
     # GUI 없이 실행

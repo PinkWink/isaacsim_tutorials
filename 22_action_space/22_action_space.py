@@ -9,8 +9,8 @@ IsaacLab이 제공하는 여러 ActionTermCfg를 비교하고, Cartpole에 적�
   - 여러 관절을 동시에 제어하는 멀티-조인트 액션
 
 실행:
-    source env_isaaclab/bin/activate
-    cd lectures/22_action_space
+    source ~/isaac/env_isaaclab/bin/activate
+    cd ~/isaac/isaacsim_tutorials/22_action_space
     python 22_action_space.py
 
     # 액션 모드 선택 (effort / position / velocity)

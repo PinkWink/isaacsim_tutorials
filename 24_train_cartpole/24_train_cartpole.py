@@ -8,8 +8,8 @@
   - TensorBoard로 학습 과정 모니터링
 
 실행:
-    source env_isaaclab/bin/activate
-    cd lectures/24_train_cartpole
+    source ~/isaac/env_isaaclab/bin/activate
+    cd ~/isaac/isaacsim_tutorials/24_train_cartpole
     python 24_train_cartpole.py
 
     # GUI 없이 학습 (권장)
@@ -250,7 +250,9 @@ def main() -> None:
     agent_cfg.max_iterations = args_cli.max_iterations
 
     # ── 로그 디렉토리 설정 ───────────────────────────────────────────────
-    log_root_path = os.path.join("logs", "rsl_rl")
+    # OnPolicyRunner는 log_dir에 바로 체크포인트/TensorBoard 로그를 기록하므로
+    # experiment_name까지 포함한 경로를 만들어 전달합니다.
+    log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] 로그 경로: {log_root_path}")
 

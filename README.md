@@ -141,6 +141,12 @@ cd ~/isaac/isaacsim_tutorials/jupyter
 | 33 | `33_pinky_sensors` | Pinky 센서 - 커스텀 로봇 센서 통합 (IMU, 인코더 등) |
 | 34 | `34_ros2_bridge` | ROS2 Jazzy 브릿지 - Gazebo 대체. /clock /tf /odom /joint_states /scan 게시 + /cmd_vel 구독 |
 
+### Part 6. 휴머노이드 강화학습 (35)
+
+| # | 폴더 | 내용 |
+|---|------|------|
+| 35 | `35_g1_standing` | G1 Standing 학습 - 빈 환경 랜덤 액션(35_1) → PPO 학습(35_2) → 정책 평가(35_3). 환경 정의는 `g1_standing_env.py` 공유 모듈 |
+
 #### Pinky Pro 에셋 준비
 
 Part 5 (30~34번) 예제에서 사용하는 Pinky Pro 로봇 에셋은 별도 저장소에서 클론해야 합니다.

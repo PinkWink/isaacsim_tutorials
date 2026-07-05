@@ -8,23 +8,24 @@
   - 랜덤 정책과 학습 정책 성능 비교
 
 실행:
-    source env_isaaclab/bin/activate
-    cd lectures/25_evaluate_policy
+    source ~/isaac/env_isaaclab/bin/activate
+    cd ~/isaac/isaacsim_tutorials/25_evaluate_policy
 
-    # 학습된 정책 평가 (체크포인트 경로 지정)
-    python 25_evaluate_policy.py --checkpoint /path/to/model_150.pt
+    # 학습된 정책 평가 (최신 체크포인트 자동 탐색)
+    python 25_evaluate_policy.py
+
+    # 체크포인트 경로 직접 지정
+    python 25_evaluate_policy.py --checkpoint /path/to/model_149.pt
 
     # 랜덤 정책으로 평가 (비교용)
     python 25_evaluate_policy.py --random
-
-    # GUI로 시각화
-    python 25_evaluate_policy.py --checkpoint /path/to/model_150.pt --num_envs 4
 """
 
 # ── 1. AppLauncher 패턴 ──────────────────────────────────────────────────
 import argparse
-import os
 import glob
+import os
+import re
 
 from isaaclab.app import AppLauncher
 
@@ -186,32 +187,33 @@ class CartpoleEvalEnvCfg(ManagerBasedRLEnvCfg):
 
 def find_latest_checkpoint() -> str | None:
     """가장 최근 학습 체크포인트를 자동으로 찾습니다."""
-    # 탐색할 경로 후보 (우선순위 순)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # 탐색할 경로 후보 (우선순위 순) — cartpole_tutorial 실험 폴더만 탐색
+    # (logs/rsl_rl 전체를 재귀 탐색하면 다른 강좌의 체크포인트가 잡힐 수 있음)
     search_paths = [
-        # 24강과 같은 워크스페이스 루트에서 실행한 경우
-        os.path.join(os.getcwd(), "logs", "rsl_rl"),
-        # isaac 워크스페이스 루트
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "logs", "rsl_rl"),
+        # 24강과 같은 위치에서 실행한 경우
+        os.path.join(os.getcwd(), "logs", "rsl_rl", "cartpole_tutorial"),
         # 24강 디렉토리 기준
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "24_train_cartpole", "logs", "rsl_rl"),
+        os.path.join(script_dir, "..", "24_train_cartpole", "logs", "rsl_rl", "cartpole_tutorial"),
+        # 워크스페이스 루트 기준
+        os.path.join(script_dir, "..", "..", "logs", "rsl_rl", "cartpole_tutorial"),
+        # 구버전(experiment_name 없이 logs/rsl_rl에 바로 저장)과의 호환
+        os.path.join(os.getcwd(), "logs", "rsl_rl"),
+        os.path.join(script_dir, "..", "..", "logs", "rsl_rl"),
     ]
+
+    def iteration_number(path: str) -> int:
+        """model_149.pt → 149. 사전순 정렬은 model_50 > model_149가 되므로 숫자로 비교."""
+        m = re.search(r"model_(\d+)\.pt$", path)
+        return int(m.group(1)) if m else -1
 
     for log_dir in search_paths:
         log_dir = os.path.abspath(log_dir)
         if not os.path.exists(log_dir):
             continue
-
-        # 직접 model_*.pt가 있는 경우 (서브디렉토리 없이)
-        direct_ckpts = sorted(glob.glob(os.path.join(log_dir, "model_*.pt")))
-        if direct_ckpts:
-            return direct_ckpts[-1]
-
-        # 서브디렉토리 안에 model_*.pt가 있는 경우
-        for sub in sorted(glob.glob(os.path.join(log_dir, "**", "model_*.pt"), recursive=True)):
-            pass  # 마지막 값을 사용
-        sub_ckpts = sorted(glob.glob(os.path.join(log_dir, "**", "model_*.pt"), recursive=True))
-        if sub_ckpts:
-            return sub_ckpts[-1]
+        ckpts = glob.glob(os.path.join(log_dir, "model_*.pt"))
+        if ckpts:
+            return max(ckpts, key=iteration_number)
 
     return None
 
@@ -263,8 +265,8 @@ def main() -> None:
                 )
                 algorithm = RslRlPpoAlgorithmCfg(
                     value_loss_coef=1.0, use_clipped_value_loss=True,
-                    clip_param=0.2, entropy_coef=0.005, num_learning_epochs=8,
-                    num_mini_batches=4, learning_rate=3e-3, gamma=0.99, lam=0.95,
+                    clip_param=0.2, entropy_coef=0.005, num_learning_epochs=5,
+                    num_mini_batches=4, learning_rate=1.0e-3, gamma=0.99, lam=0.95,
                     desired_kl=0.01, max_grad_norm=1.0,
                 )
 
@@ -282,7 +284,7 @@ def main() -> None:
         else:
             print("[WARNING] 체크포인트를 찾을 수 없습니다. 랜덤 정책으로 평가합니다.")
             print("  먼저 24강 학습을 실행하세요:")
-            print("    python ../24_train_cartpole/24_train_cartpole.py --headless")
+            print("    cd ../24_train_cartpole && python 24_train_cartpole.py --headless")
             use_random = True
 
     # wrapped env가 없으면 (랜덤 모드) 원래 env 사용
