@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pinky_slam_nav</name>
+  <version>0.1.0</version>
+  <description>
+    Pinky Pro SLAM(slam_toolbox) + Nav2 자율주행 실습 패키지 (IsaacSim 34-1강 연동).
+    런치/설정 파일만 담은 패키지로, 시뮬레이터는 34_1_slam_nav.py가 담당합니다.
+  </description>
+  <maintainer email="pinkwink.korea@gmail.com">pinkwink</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>navigation2</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

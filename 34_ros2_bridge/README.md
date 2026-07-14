@@ -317,13 +317,95 @@ sed 's|filename="/|filename="file:///|g' pinky_pro.urdf
 
 ---
 
+## 34-1: SLAM + Nav2 자율주행
+
+34번 브릿지를 그대로 확장해 **slam_toolbox로 지도를 만들고 Nav2로 자율주행**하는
+실습입니다. 구성 요소 두 가지:
+
+- `34_1_slam_nav.py` — IsaacSim 측. 34번과 동일한 브릿지에
+  ① LiDAR를 `RPLIDAR_S2E`로 교체 (34번의 `Example_Rotary_2D`는 최소 감지
+  거리 1.0m + 빔 -2° 기울어짐이라 좁은 미로에서 SLAM 불가),
+  ② 8×8m 미로 (중앙 섬 방 + 링 복도 + 4분할 방 + 기둥 — 링을 한 바퀴 돌면
+  **루프 클로저** 관찰), ③ 남서쪽 방 (-2.7, -2.7) 스폰.
+- `pinky_slam_nav/` — ROS2 패키지. SLAM/Nav2 런치 + Pinky 실기 패키지
+  (`pinky_navigation`)에서 가져와 시뮬용으로 튜닝한 파라미터.
+
+```
+       N (+y)
+  ┌───────┬───────┐
+  │  NW ■ │ ■ NE  │    ■ = 기둥 (스캔 특징)
+  ├─┐   ┌─┴─┐   ┌─┤    섬 둘레 링 복도 폭 ~2.6m
+  │ │   │섬 │   │ │    문: 섬 북쪽 1.2m, 각 스포크 1.0m
+  │ │   └───┘   │ │
+  ├─┘           └─┤
+  │ 🤖SW      SE  │    🤖 = 로봇 스폰 (-2.7, -2.7)
+  └───────┴───────┘
+```
+
+### 패키지 빌드 (최초 1회)
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd ~/isaac/isaacsim_tutorials/34_ros2_bridge
+colcon build --symlink-install       # build/ install/ log/가 이 폴더에 생김
+source install/setup.bash            # ROS2 터미널마다 필요
+```
+
+### 흐름 1 — 2단계: 지도 작성 → 저장 → 자율주행 (실제 로봇 워크플로우)
+
+| 터미널 | 명령 |
+|---|---|
+| T1 (sim) | `source /opt/ros/jazzy/setup.bash` → `source env_isaaclab/bin/activate` → `python 34_1_slam_nav.py` |
+| T2 (SLAM) | `source /opt/ros/jazzy/setup.bash && source install/setup.bash` → `ros2 launch pinky_slam_nav slam.launch.py` |
+| T3 (주행) | `ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p use_sim_time:=true` |
+
+T3에서 **링 복도를 한 바퀴** 돌아보세요 — 출발점에 돌아올 때 RViz 지도가
+살짝 "당겨지며" 정렬되는 루프 클로저를 볼 수 있습니다. 지도가 완성되면:
+
+```bash
+# T4 — slam이 켜져 있는 상태에서 지도 저장
+ros2 run nav2_map_server map_saver_cli \
+  -f ~/isaac/isaacsim_tutorials/34_ros2_bridge/pinky_slam_nav/maps/maze \
+  --ros-args -p use_sim_time:=true
+```
+
+T2(slam)를 종료하고, 저장된 지도로 Nav2를 시작합니다 (sim은 그대로 유지):
+
+```bash
+ros2 launch pinky_slam_nav nav.launch.py \
+  map:=$HOME/isaac/isaacsim_tutorials/34_ros2_bridge/pinky_slam_nav/maps/maze.yaml
+```
+
+로봇이 스폰 위치에 있으면 초기 포즈가 자동으로 잡힙니다 (지도 원점 = 스폰
+위치). 어긋나 보이면 RViz **2D Pose Estimate**로 지정 → **Nav2 Goal**로
+목표를 찍으면 자율주행합니다.
+
+### 흐름 2 — 동시: SLAM하며 바로 자율주행
+
+```bash
+# T1(sim)은 흐름 1과 동일. T2 하나로 끝:
+ros2 launch pinky_slam_nav slam_nav.launch.py
+```
+
+지도 없이 바로 RViz에서 Nav2 Goal을 찍으세요. slam_toolbox가 실시간으로
+map→odom을 공급하므로 AMCL 없이 동작하며, 미탐사 영역으로 주행하면
+지도가 함께 자라납니다. NE 방(문 2개 통과)으로 목표를 찍어보세요.
+
+### 34-1 트러블슈팅
+
+| 증상 | 원인/해결 |
+|---|---|
+| 지도가 안 만들어짐 (`/map` 없음) | teleop으로 로봇을 조금 움직여야 스캔이 등록됨 (`minimum_travel_distance: 0.3`). T1에서 `world.play()`까지 갔는지도 확인 |
+| RViz에서 LaserScan 안 보임 | Reliability를 **Best Effort**로 (제공된 rviz 설정에는 반영돼 있음) |
+| Nav2가 Goal을 거부 | 흐름 1이면 초기 포즈(2D Pose Estimate)부터. `ros2 run tf2_ros tf2_echo map base_footprint`로 TF 체인 확인 |
+| 로봇이 벽에 너무 붙어 주행 | `config/nav2_params.yaml`의 `inflation_radius`(기본 0.15)를 키우기 |
+| 34번을 쓰면 안 되나? | 34번의 `Example_Rotary_2D` LiDAR는 1m 이내 벽이 안 보여 SLAM에 부적합 — 34-1 전용 스크립트를 쓰세요 |
+| headless로 돌리고 싶다 | `--headless --enable_cameras` 두 플래그 필요 (RTX LiDAR 렌더링). GUI가 없으면 `isaacsim.robot.wheeled_robots` 익스텐션도 자동 로드되지 않아 34-1이 명시적으로 켭니다 |
+
 ## 다음 단계 (강의 외 확장)
 
-- **SLAM**: `slam_toolbox`로 매핑
-  ```bash
-  ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true
-  ```
-- **자율 주행**: `nav2_bringup`로 nav2 스택. `/scan`/`/odom`/`/tf`만 있으면 그대로 동작.
 - **카메라 추가**: `ROS2CameraHelper`로 `/image_raw` 게시 (33강의 카메라 prim 활용).
 - **3D 포인트클라우드**: LiDAR config를 `Example_Rotary` (3D)로 바꾸고
   `RtxLidarROS2PublishPointCloud` writer 추가.
+- **Waypoint 미션**: `nav2_simple_commander`(Python API)로 여러 방을 순회하는
+  waypoint following 스크립트 작성.

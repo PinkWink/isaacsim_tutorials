@@ -15,6 +15,12 @@ logs/
 
 # g1이 git clone으로 받는 외부 보행 모션 데이터 (g1.py 주석의 안내대로 사용자가 별도 클론)
 g1/g1_retargeted_motions/
+36_g1_walking/g1_retargeted_motions/
+
+# 34-1 colcon 빌드 산출물 (colcon build로 재생성됨)
+34_ros2_bridge/build/
+34_ros2_bridge/install/
+34_ros2_bridge/log/
 
 # Python
 __pycache__/

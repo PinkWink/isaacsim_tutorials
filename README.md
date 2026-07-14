@@ -139,13 +139,14 @@ cd ~/isaac/isaacsim_tutorials/jupyter
 | 31 | `31_urdf_to_usd` | URDF->USD 변환 - UrdfConverter를 사용한 에셋 변환 파이프라인 |
 | 32 | `32_pinky_control` | Pinky 제어 - 차동 구동 제어, 웨이포인트 내비게이션 |
 | 33 | `33_pinky_sensors` | Pinky 센서 - 커스텀 로봇 센서 통합 (IMU, 인코더 등) |
-| 34 | `34_ros2_bridge` | ROS2 Jazzy 브릿지 - Gazebo 대체. /clock /tf /odom /joint_states /scan 게시 + /cmd_vel 구독 |
+| 34 | `34_ros2_bridge` | ROS2 Jazzy 브릿지 - Gazebo 대체. /clock /tf /odom /joint_states /scan 게시 + /cmd_vel 구독. 34-1: SLAM(slam_toolbox)+Nav2 자율주행 — 8×8 미로, `pinky_slam_nav` ROS2 패키지 포함 (매핑→지도 저장→AMCL 주행 / 동시 SLAM 주행) |
 
-### Part 6. 휴머노이드 강화학습 (35)
+### Part 6. 휴머노이드 강화학습 (35~36)
 
 | # | 폴더 | 내용 |
 |---|------|------|
 | 35 | `35_g1_standing` | G1 Standing 학습 - 빈 환경 랜덤 액션(35_1) → PPO 학습(35_2) → 정책 평가(35_3). 환경 정의는 `g1_standing_env.py` 공유 모듈 |
+| 36 | `36_g1_walking` | G1 Walking 학습 - 모션 모방(imitation): 레퍼런스 모션 재생(36_1) → RSI + PPO 모방 학습(36_2) → 정책 평가(36_3). 환경 정의는 `g1_walking_env.py` 공유 모듈. 레퍼런스 모션 데이터는 `36_g1_walking/g1_retargeted_motions` 필요 (HuggingFace `openhe/g1-retargeted-motions`) |
 
 #### Pinky Pro 에셋 준비
 

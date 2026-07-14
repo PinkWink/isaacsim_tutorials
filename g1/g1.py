@@ -65,10 +65,9 @@ def base_vertical_velocity_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
     return torch.square(vz)
 
 
-# 보행 레퍼런스 모션 데이터는 용량 문제로 저장소에 포함하지 않습니다.
-# 아래 명령으로 이 스크립트와 같은 폴더에 직접 내려받으세요:
+# 보행 레퍼런스 모션 데이터는 36_g1_walking 폴더로 이동했습니다 (36강에서 공유).
 #   git clone https://huggingface.co/datasets/openhe/g1-retargeted-motions g1_retargeted_motions
-MOTIONS_DIR = Path(__file__).resolve().parent / "g1_retargeted_motions"
+MOTIONS_DIR = Path(__file__).resolve().parent.parent / "36_g1_walking" / "g1_retargeted_motions"
 
 PKL_JOINT_NAMES = [
     "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
