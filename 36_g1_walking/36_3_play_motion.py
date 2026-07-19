@@ -1,5 +1,5 @@
 """
-36_3_play_walking.py - 학습된 G1 Walking 정책 평가 및 시각화
+36_3_play_motion.py - 학습된 G1 Walking 정책 평가 및 시각화
 
 36_2에서 학습한 PPO 체크포인트를 로드하여 G1이 레퍼런스 모션처럼 걷는
 모습을 확인하고 성능을 평가합니다:
@@ -15,20 +15,18 @@
     cd lectures/36_g1_walking
 
     # 최신 체크포인트 자동 탐색 후 평가
-    python 36_3_play_walking.py
+    python 36_3_play_motion.py
 
     # 체크포인트 직접 지정
-    python 36_3_play_walking.py --checkpoint logs/rsl_rl/g1_walking_tutorial/model_2000.pt
+    python 36_3_play_motion.py --checkpoint logs/rsl_rl/g1_walking_tutorial/model_2000.pt
 
     # 랜덤 정책으로 평가 (학습 전후 비교용)
-    python 36_3_play_walking.py --random
+    python 36_3_play_motion.py --random
 """
 
 # ── 1. AppLauncher 패턴 ──────────────────────────────────────────────────
 import argparse
-import glob
 import os
-import re
 
 from isaaclab.app import AppLauncher
 
@@ -52,7 +50,7 @@ from isaaclab.envs import ManagerBasedRLEnv
 
 # 공유 환경 모듈 (같은 폴더의 g1_walking_env.py)
 # 학습(36_2)과 동일한 관측/보상/네트워크 정의를 써야 체크포인트가 정상 동작합니다.
-from g1_walking_env import MOTION, G1WalkingEnvCfg, make_ppo_runner_cfg
+from g1_walking_env import MOTION, G1WalkingEnvCfg, find_latest_checkpoint, make_ppo_runner_cfg
 
 # ── 3. Matplotlib (토크 모니터링용) ──────────────────────────────────────
 import matplotlib
@@ -76,40 +74,6 @@ TORQUE_JOINT_EXPR = [
     "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
     "torso_joint",
 ]
-
-
-# ══════════════════════════════════════════════════════════════════════════
-#  체크포인트 자동 탐색
-# ══════════════════════════════════════════════════════════════════════════
-
-
-def find_latest_checkpoint() -> str | None:
-    """가장 최근 학습 체크포인트를 자동으로 찾습니다."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    # 탐색할 경로 후보 (우선순위 순)
-    search_paths = [
-        # 36_2와 같은 위치에서 실행한 경우
-        os.path.join(os.getcwd(), "logs", "rsl_rl", "g1_walking_tutorial"),
-        # 이 스크립트 폴더 기준
-        os.path.join(script_dir, "logs", "rsl_rl", "g1_walking_tutorial"),
-        # 워크스페이스 루트 기준
-        os.path.join(script_dir, "..", "..", "logs", "rsl_rl", "g1_walking_tutorial"),
-    ]
-
-    def iteration_number(path: str) -> int:
-        m = re.search(r"model_(\d+)\.pt$", path)
-        return int(m.group(1)) if m else -1
-
-    for log_dir in search_paths:
-        log_dir = os.path.abspath(log_dir)
-        if not os.path.exists(log_dir):
-            continue
-        ckpts = glob.glob(os.path.join(log_dir, "**", "model_*.pt"), recursive=True)
-        if ckpts:
-            # model_2000 > model_950이 되도록 iteration 번호 기준 정렬 (사전순 정렬은 오답)
-            return max(ckpts, key=iteration_number)
-
-    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -165,7 +129,7 @@ def main() -> None:
         else:
             print("[WARNING] 체크포인트를 찾을 수 없습니다. 랜덤 정책으로 평가합니다.")
             print("  먼저 36_2 학습을 실행하세요:")
-            print("    python 36_2_train_walking.py --headless")
+            print("    python 36_2_train_motion.py --headless")
             use_random = True
 
     mode_name = "랜덤" if use_random else "학습"
@@ -326,7 +290,7 @@ def main() -> None:
         print(f"  생존율 (10초 보행):  {success_rate:.1f}%")
         print(f"{'=' * 70}")
         if use_random:
-            print("  → 학습된 정책과 비교해 보세요: python 36_3_play_walking.py")
+            print("  → 학습된 정책과 비교해 보세요: python 36_3_play_motion.py")
 
     # ── 토크 통계 및 그래프 저장 ─────────────────────────────────────────
     if torque_hist:

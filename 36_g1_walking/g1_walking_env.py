@@ -23,7 +23,10 @@ g1_walking_env.py - G1 Walking(모션 모방) 공유 환경 모듈 (실행 파�
     시뮬레이터를 먼저 실행한 뒤에 import해야 합니다. (각 실행 스크립트 참고)
 """
 
+import glob
+import os
 import pickle
+import re
 from pathlib import Path
 
 import torch
@@ -541,3 +544,37 @@ def make_ppo_runner_cfg(max_iterations: int = 2000) -> RslRlOnPolicyRunnerCfg:
             critic_obs_normalization=True,
         ),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  체크포인트 자동 탐색 (36_1 비교 재생 / 36_3 평가 공용)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def find_latest_checkpoint() -> str | None:
+    """가장 최근 학습 체크포인트를 자동으로 찾습니다."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # 탐색할 경로 후보 (우선순위 순)
+    search_paths = [
+        # 36_2와 같은 위치에서 실행한 경우
+        os.path.join(os.getcwd(), "logs", "rsl_rl", "g1_walking_tutorial"),
+        # 이 스크립트 폴더 기준
+        os.path.join(script_dir, "logs", "rsl_rl", "g1_walking_tutorial"),
+        # 워크스페이스 루트 기준
+        os.path.join(script_dir, "..", "..", "logs", "rsl_rl", "g1_walking_tutorial"),
+    ]
+
+    def iteration_number(path: str) -> int:
+        m = re.search(r"model_(\d+)\.pt$", path)
+        return int(m.group(1)) if m else -1
+
+    for log_dir in search_paths:
+        log_dir = os.path.abspath(log_dir)
+        if not os.path.exists(log_dir):
+            continue
+        ckpts = glob.glob(os.path.join(log_dir, "**", "model_*.pt"), recursive=True)
+        if ckpts:
+            # model_2000 > model_950이 되도록 iteration 번호 기준 정렬 (사전순 정렬은 오답)
+            return max(ckpts, key=iteration_number)
+
+    return None
